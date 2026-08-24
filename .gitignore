@@ -1,0 +1,28 @@
+# .gitignore
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+# never commit credentials
+*.token
+secrets.*
+
+# SwiftPM
+.build/
+
+# built app bundle
+*.app/
+
+# generated icon staging dir
+AppIcon.iconset/
+
+# Local agent contract — contains real repo names in its safety rules.
+# Deliberately NOT published: the rules only work if they name real targets.
+CLAUDE.md
+
+# The scrub script lives outside the repo: its substitution table is a map
+# of the real identifiers it exists to remove.
+scripts/scrub-identifiers.py

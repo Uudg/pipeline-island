@@ -1,0 +1,184 @@
+import Foundation
+
+/// A fake pipeline that runs its whole lifecycle locally.
+@MainActor
+public enum DemoData {
+    /// One frame of the scripted run.
+    struct Frame {
+        let at: TimeInterval
+        let pipelineStatus: PipelineStatus
+        /// stage name -> status
+        let stages: [(String, PipelineStatus)]
+        /// job name -> (stage, status)
+        let jobs: [(String, String, PipelineStatus)]
+    }
+
+    /// A compressed but faithful staging run.
+    static let script: [Frame] = [
+        Frame(at: 0, pipelineStatus: .created,
+              stages: [("test", .created), ("deploy", .created)],
+              jobs: [("test:api", "test", .created), ("test:payments", "test", .created),
+                     ("test:docker-build", "test", .created), ("deploy:staging", "deploy", .created)]),
+
+        Frame(at: 2, pipelineStatus: .running,
+              stages: [("test", .running), ("deploy", .created)],
+              jobs: [("test:api", "test", .running), ("test:payments", "test", .running),
+                     ("test:docker-build", "test", .running), ("deploy:staging", "deploy", .created)]),
+
+        Frame(at: 7, pipelineStatus: .running,
+              stages: [("test", .running), ("deploy", .created)],
+              jobs: [("test:api", "test", .success), ("test:payments", "test", .running),
+                     ("test:docker-build", "test", .running), ("deploy:staging", "deploy", .created)]),
+
+        Frame(at: 11, pipelineStatus: .running,
+              stages: [("test", .running), ("deploy", .created)],
+              jobs: [("test:api", "test", .success), ("test:payments", "test", .success),
+                     ("test:docker-build", "test", .running), ("deploy:staging", "deploy", .created)]),
+
+        Frame(at: 15, pipelineStatus: .running,
+              stages: [("test", .success), ("deploy", .pending)],
+              jobs: [("test:api", "test", .success), ("test:payments", "test", .success),
+                     ("test:docker-build", "test", .success), ("deploy:staging", "deploy", .pending)]),
+
+        Frame(at: 17, pipelineStatus: .running,
+              stages: [("test", .success), ("deploy", .running)],
+              jobs: [("test:api", "test", .success), ("test:payments", "test", .success),
+                     ("test:docker-build", "test", .success), ("deploy:staging", "deploy", .running)]),
+
+        Frame(at: 24, pipelineStatus: .success,
+              stages: [("test", .success), ("deploy", .success)],
+              jobs: [("test:api", "test", .success), ("test:payments", "test", .success),
+                     ("test:docker-build", "test", .success), ("deploy:staging", "deploy", .success)]),
+    ]
+
+    /// A second, failing run so the red path gets exercised too.
+    static let failScript: [Frame] = [
+        Frame(at: 0, pipelineStatus: .running,
+              stages: [("lint", .running), ("test", .created)],
+              jobs: [("lint:eslint", "lint", .running), ("test:unit", "test", .created)]),
+
+        Frame(at: 5, pipelineStatus: .running,
+              stages: [("lint", .running), ("test", .created)],
+              jobs: [("lint:eslint", "lint", .running), ("test:unit", "test", .created)]),
+
+        Frame(at: 9, pipelineStatus: .failed,
+              stages: [("lint", .failed), ("test", .skipped)],
+              jobs: [("lint:eslint", "lint", .failed), ("test:unit", "test", .skipped)]),
+    ]
+
+    /// Build a `MonitorState` for a given script frame.
+    static func state(
+        frame: Frame,
+        project: String,
+        iid: String,
+        ref: String,
+        startedAt: Date
+    ) -> MonitorState {
+        MonitorState(
+            projects: [pipelineProject(frame: frame, project: project, iid: iid,
+                                       ref: ref, startedAt: startedAt)],
+            lastUpdate: Date(), error: nil, isPolling: true
+        )
+    }
+
+    private static func pipelineProject(
+        frame: Frame,
+        project: String,
+        iid: String,
+        ref: String,
+        startedAt: Date
+    ) -> Project {
+        let pipeline = Pipeline(
+            iid: iid,
+            path: "/\(project)/-/pipelines/999999\(iid)",
+            status: frame.pipelineStatus,
+            ref: ref,
+            source: "push",
+            duration: frame.pipelineStatus.isActive ? nil : Int(frame.at),
+            startedAt: startedAt,
+            finishedAt: frame.pipelineStatus.isActive ? nil : Date(),
+            detailedStatus: .init(text: frame.pipelineStatus.rawValue.lowercased()),
+            stages: Connection(nodes: frame.stages.map { Stage(name: $0.0, status: $0.1) }),
+            jobs: Connection(nodes: frame.jobs.map {
+                Job(name: $0.0, status: $0.2, stage: .init(name: $0.1))
+            }),
+            projectPath: project
+        )
+        return Project(fullPath: project, pipelines: Connection(nodes: [pipeline]))
+    }
+
+    /// A third cycle: three pipelines running at once, at different points in their lifecycles.
+    static func concurrentState(tick: Int, withFailure: Bool = false) -> MonitorState {
+        let now = Date()
+        let specs: [(project: String, ref: String, iid: String, offset: Int)] = [
+            ("acme/web-app", "staging", "442", 0),
+            ("acme/dashboard", "main", "88", 2),
+            ("acme/notifier", "fix/webhook-retry", "13", 4),
+        ]
+        let projects = specs.enumerated().map { index, spec -> Project in
+            if withFailure && index == 2 {
+                return pipelineProject(
+                    frame: failScript[2],
+                    project: spec.project,
+                    iid: spec.iid,
+                    ref: spec.ref,
+                    startedAt: now.addingTimeInterval(-9)
+                )
+            }
+            let frameIndex = min((tick + spec.offset) % (script.count + 2), script.count - 1)
+            return pipelineProject(
+                frame: script[frameIndex],
+                project: spec.project,
+                iid: spec.iid,
+                ref: spec.ref,
+                startedAt: now.addingTimeInterval(-Double(script[frameIndex].at))
+            )
+        }
+        return MonitorState(projects: projects, lastUpdate: now, error: nil, isPolling: true)
+    }
+
+    /// Run the demo loop, pushing state into the model on the main actor.
+    public static func run(model: IslandModel) -> Task<Void, Never> {
+        Task { @MainActor in
+            var cycle = 0
+            while !Task.isCancelled {
+                switch cycle % 3 {
+                case 0, 1:
+                    let failing = cycle % 3 == 1
+                    let frames = failing ? failScript : script
+                    let project = failing ? "acme/dashboard" : "acme/web-app"
+                    let ref = failing ? "feature/checkout" : "staging"
+                    let iid = failing ? "77" : "442"
+                    let startedAt = Date()
+
+                    var previous: TimeInterval = 0
+                    for frame in frames {
+                        let wait = frame.at - previous
+                        previous = frame.at
+                        if wait > 0 {
+                            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                        }
+                        if Task.isCancelled { return }
+                        model.apply(state(frame: frame, project: project,
+                                          iid: iid, ref: ref, startedAt: startedAt))
+                    }
+
+                default:
+                    // Three at once, each at a different point in its lifecycle.
+                    for tick in 0..<10 {
+                        if Task.isCancelled { return }
+                        model.apply(concurrentState(tick: tick))
+                        try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    }
+                }
+
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if Task.isCancelled { return }
+                model.apply(MonitorState(projects: [], lastUpdate: Date(),
+                                         error: nil, isPolling: true))
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                cycle += 1
+            }
+        }
+    }
+}

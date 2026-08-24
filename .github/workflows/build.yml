@@ -1,0 +1,85 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      # Only the geometry spikes: the rest need a GitLab token and a live
+      # account, which CI has neither of. These are pure arithmetic and cover
+      # the two bugs that shipped twice (off-centre island, hover jump).
+      - name: Geometry regression suite
+        run: |
+          swift spike/CenteringVerify.swift
+          swift spike/NotchPlacementVerify.swift
+
+      - name: Build app bundle
+        run: make app
+
+      - name: Verify the bundle is well-formed
+        run: |
+          APP=.build/debug/PipelineIsland.app
+          test -f "$APP/Contents/MacOS/PipelineIsland" || { echo "missing binary"; exit 1; }
+          test -f "$APP/Contents/Info.plist"           || { echo "missing Info.plist"; exit 1; }
+          plutil -lint "$APP/Contents/Info.plist"
+          echo "bundle OK"
+
+  release:
+    # Tag builds also publish a source tarball. The app is NOT shipped as a
+    # prebuilt binary: without a paid Apple Developer ID it would be ad-hoc
+    # signed, and macOS refuses to open a downloaded ad-hoc app ("is damaged").
+    # Homebrew builds from source on the user's machine instead, which sidesteps
+    # Gatekeeper entirely. See README.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create source tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="pipeline-island-$VERSION/" \
+            -o "pipeline-island-$VERSION.tar.gz" HEAD
+          shasum -a 256 "pipeline-island-$VERSION.tar.gz" | tee sha256.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pipeline-island-*.tar.gz
+            sha256.txt
+          body: |
+            Install with Homebrew:
+
+            ```bash
+            brew install --cask Uudg/tap/pipeline-island
+            ```
+
+            Or build from source:
+
+            ```bash
+            git clone https://github.com/${{ github.repository }}
+            cd pipeline-island
+            make signing-identity   # once, stops repeated keychain prompts
+            make app
+            open .build/debug/PipelineIsland.app
+            ```
+
+            The `sha256` above is for the Homebrew cask formula.
