@@ -17,6 +17,12 @@ macOS 14+, Swift 6, no third-party dependencies.
 ## Install
 
 ```bash
+brew install --cask Uudg/tap/pipeline-island
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/Uudg/pipeline-island
 cd pipeline-island
 make signing-identity   # once, stops repeated keychain prompts
@@ -24,16 +30,17 @@ make app
 open .build/debug/PipelineIsland.app
 ```
 
-Needs a Swift toolchain — `xcode-select --install` if you don't have one.
+Either way you need a Swift toolchain — `xcode-select --install` if you don't
+have one. Both routes compile on your machine.
 
 Then click the menu bar icon, open Settings, and paste a GitLab token with the
 `read_api` scope. There's a button that takes you straight to the token page.
 
-There's no download to grab. Signing an app for distribution needs a paid Apple
-Developer ID, and without one a downloaded build just gets blocked by Gatekeeper
-with "is damaged and can't be opened". Compiling it yourself avoids that
-entirely. A Homebrew cask is in `packaging/homebrew/` for when there's a release
-to point it at.
+There's no binary to download, and that's deliberate. Signing an app for
+distribution needs a paid Apple Developer ID, and without one a downloaded build
+just gets blocked by Gatekeeper with "is damaged and can't be opened".
+Something you compiled yourself is never quarantined, so the problem doesn't
+arise.
 
 ## Settings
 
