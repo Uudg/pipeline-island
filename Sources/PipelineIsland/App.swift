@@ -30,6 +30,11 @@ enum PipelineIslandApp {
         case "--snapshot-multi":
             let outMulti = arguments.count > 2 ? arguments[2] : "island-multi.png"
             launchUI(snapshotPath: outMulti, snapshotMulti: true)
+        case "--record":
+            // Record the island to a PNG sequence for the README demo.
+            NotchGeometry.simulateNotch = true
+            let dir = arguments.count > 2 ? arguments[2] : "demo-frames"
+            launchUI(demo: true, recordTo: dir)
         case "--demo-notch":
             NotchGeometry.simulateNotch = true
             launchUI(demo: true)
@@ -38,17 +43,17 @@ enum PipelineIslandApp {
         case "--verify-ui":
             launchUI(verifyOnly: true)
         default:
-            print("usage: PipelineIsland [run | --demo | --demo-notch | --verify-ui | --snapshot <path> | store <PAT> | migrate | delete | verify]")
+            print("usage: PipelineIsland [run | --demo | --demo-notch | --record <dir> | --verify-ui | --snapshot <path> | store <PAT> | migrate | delete | verify]")
             exit(1)
         }
     }
 
     @MainActor
-    private static func launchUI(verifyOnly: Bool = false, snapshotPath: String? = nil, demo: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
+    private static func launchUI(verifyOnly: Bool = false, snapshotPath: String? = nil, demo: Bool = false, recordTo: String? = nil, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
-        let delegate = AppDelegate(verifyOnly: verifyOnly, snapshotPath: snapshotPath, demo: demo, snapshotMulti: snapshotMulti, snapshotFailure: snapshotFailure, snapshotNotch: snapshotNotch)
+        let delegate = AppDelegate(verifyOnly: verifyOnly, snapshotPath: snapshotPath, demo: demo, recordTo: recordTo, snapshotMulti: snapshotMulti, snapshotFailure: snapshotFailure, snapshotNotch: snapshotNotch)
         app.delegate = delegate
         app.run()
     }
@@ -71,18 +76,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let verifyOnly: Bool
     private let snapshotPath: String?
     private let demo: Bool
+    private let recordTo: String?
     private let snapshotMulti: Bool
     private let snapshotFailure: Bool
     private let snapshotNotch: Bool
     private var demoTask: Task<Void, Never>?
+    private var recorder: DemoRecorder?
     private var preferencesTask: Task<Void, Never>?
     private var statusItem: StatusItemController?
     private var settingsWindow: SettingsWindowController?
 
-    init(verifyOnly: Bool, snapshotPath: String?, demo: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
+    init(verifyOnly: Bool, snapshotPath: String?, demo: Bool = false, recordTo: String? = nil, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         self.verifyOnly = verifyOnly
         self.snapshotPath = snapshotPath
         self.demo = demo
+        self.recordTo = recordTo
         self.snapshotMulti = snapshotMulti
         self.snapshotFailure = snapshotFailure
         self.snapshotNotch = snapshotNotch
@@ -128,6 +136,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Scripted local data only — no monitor, no network, no keychain.
             print("demo mode: scripted pipelines, no GitLab calls")
             TokenCache.shared.isDisabled = true
+            if let recordTo {
+                demoTask = DemoData.runForRecording(model: model)
+                recorder = DemoRecorder(
+                    model: model,
+                    outputDirectory: URL(fileURLWithPath: recordTo)
+                )
+                recorder?.start()
+                return
+            }
             demoTask = DemoData.run(model: model)
             observeModelForLayout()
             return

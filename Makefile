@@ -81,6 +81,10 @@ spikes-offline:
 
 # Create a stable local signing identity so the keychain stops re-prompting on
 # every rebuild. Run once; asks for the login password a single time.
+# Record the README demo (GIF + MP4 + stills). Uses scripted data only.
+demo-media: build
+	@bash scripts/make-demo.sh
+
 # Regenerate the app icon from scripts/make-icon.swift.
 icon:
 	@swift scripts/make-icon.swift

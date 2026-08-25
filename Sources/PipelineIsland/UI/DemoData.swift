@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// A fake pipeline that runs its whole lifecycle locally.
 @MainActor
@@ -135,6 +136,54 @@ public enum DemoData {
             )
         }
         return MonitorState(projects: projects, lastUpdate: now, error: nil, isPolling: true)
+    }
+
+    /// A condensed script for the README recording.
+    ///
+    /// The normal demo loop runs ~65s, which is far too long for a GIF. This
+    /// hits the four things worth showing — arrive, run, expand on hover,
+    /// finish, then a failure — in about 20 seconds.
+    static func runForRecording(model: IslandModel) -> Task<Void, Never> {
+        Task { @MainActor in
+            let start = Date()
+            func at(_ seconds: TimeInterval) async {
+                let target = start.addingTimeInterval(seconds)
+                let wait = target.timeIntervalSinceNow
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+            }
+
+            // Empty for a beat, so the island is seen arriving.
+            model.apply(MonitorState(projects: [], lastUpdate: Date(), error: nil, isPolling: true))
+
+            let ref = "staging"
+            let project = "acme/web-app"
+
+            // Arrive, and run through the stages.
+            for (index, frame) in script.enumerated() {
+                await at(1.5 + Double(index) * 1.6)
+                model.apply(state(frame: frame, project: project, iid: "442", ref: ref,
+                                  startedAt: start.addingTimeInterval(-8)))
+            }
+
+            // Hover: expand and hold long enough to read.
+            await at(8.5)
+            withAnimation(Motion.expand) { model.isExpanded = true }
+            await at(13.0)
+            withAnimation(Motion.collapse) { model.isExpanded = false }
+
+            // Success, then let it settle out.
+            await at(14.0)
+            model.apply(state(frame: script[script.count - 1], project: project, iid: "442",
+                              ref: ref, startedAt: start.addingTimeInterval(-100)))
+
+            // A failure, because that is the state people actually care about.
+            await at(16.5)
+            model.apply(state(frame: failScript[failScript.count - 1], project: "acme/notifier",
+                              iid: "13", ref: "fix/webhook-retry",
+                              startedAt: start.addingTimeInterval(-40)))
+            await at(18.0)
+            withAnimation(Motion.expand) { model.isExpanded = true }
+        }
     }
 
     /// Run the demo loop, pushing state into the model on the main actor.
