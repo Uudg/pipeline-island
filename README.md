@@ -21,7 +21,7 @@ Or from source:
 ```bash
 git clone https://github.com/Uudg/pipeline-island
 cd pipeline-island
-make signing-identity   # once, stops repeated keychain prompts
+make signing-identity   # once, stops repeated keychain prompts (not with sudo)
 make app
 open .build/debug/PipelineIsland.app
 ```

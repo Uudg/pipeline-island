@@ -1,49 +1,60 @@
 #!/bin/bash
-# Create a stable self-signed code-signing identity for local development.
+# Create a stable local signing identity for development.
 #
-# WHY THIS EXISTS
+# WHY
 #
-# The macOS keychain ties an item's ACL to the calling binary's *designated
-# requirement*. For an ad-hoc signed app that requirement is:
+# The macOS keychain ties an item's ACL to the calling binary's designated
+# requirement. For an ad-hoc signed app that requirement is the binary's own
+# hash:
 #
 #     designated => cdhash H"aee7ba65..."
 #
-# — the hash of the binary itself. Every rebuild produces a different hash, so
-# every rebuild is a brand-new identity as far as the keychain is concerned, and
-# macOS re-prompts for the login password. Clicking "Always Allow" authorises
-# only the exact build you clicked it for. During active development that means
-# a password prompt every few minutes.
+# which changes on every rebuild. So macOS treats each build as a brand-new
+# app and asks for your login password again — "Always Allow" only ever
+# authorises the exact build you clicked it on.
 #
-# Signing with a certificate instead gives:
+# Signing with a certificate gives a requirement that keys off the certificate
+# instead, which survives rebuilds. Approve once, done.
 #
-#     designated => identifier "com.pipelineisland.app" and certificate leaf H"..."
+# This is a local development certificate. Not an Apple Developer ID: no
+# notarization, no distribution, nothing leaves the machine.
 #
-# which is stable across rebuilds. Approve once, never again.
+# Usage:  make signing-identity          <- NOT with sudo
 #
-# This creates a *local, self-signed* certificate. It is not an Apple Developer
-# ID: it does not enable notarization or distribution, it only makes the local
-# identity stable. Nothing leaves the machine.
-#
-# Usage:  make signing-identity     (or run this script directly)
+# Do not run this with sudo. Under sudo the certificate lands in root's
+# keychain, where your apps cannot see it, and the import silently succeeds
+# while nothing works afterwards.
 
 set -euo pipefail
 
 CERT_NAME="Pipeline Island Dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
-if security find-certificate -c "$CERT_NAME" >/dev/null 2>&1; then
-    echo "signing identity '$CERT_NAME' already exists"
-    security find-identity -v -p codesigning | grep "$CERT_NAME" || true
+if [ "$(id -u)" -eq 0 ]; then
+    cat >&2 <<'EOF'
+Do not run this with sudo.
+
+Under sudo the certificate is imported into root's keychain, not yours, so the
+app still cannot use it. Run it as yourself:
+
+    make signing-identity
+
+You may be prompted to allow keychain access once, which is expected.
+EOF
+    exit 1
+fi
+
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT_NAME"; then
+    echo "signing identity '$CERT_NAME' already exists:"
+    security find-identity -v -p codesigning | grep "$CERT_NAME"
     exit 0
 fi
 
-echo "Creating a self-signed code-signing certificate: $CERT_NAME"
+echo "Creating a local code-signing certificate: $CERT_NAME"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# Minimal OpenSSL config with the codeSigning extended key usage. Without
-# extendedKeyUsage=codeSigning, `codesign` refuses the certificate.
 cat > "$TMP/cert.conf" <<'CONF'
 [ req ]
 distinguished_name = dn
@@ -63,33 +74,56 @@ openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
     -days 3650 -config "$TMP/cert.conf" 2>/dev/null
 
-# Bundle key + cert into a PKCS#12 for import.
-openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -out "$TMP/identity.p12" -passout pass: -name "$CERT_NAME" 2>/dev/null
+# The PKCS#12 needs a real password. macOS `security import` fails MAC
+# verification on an empty-password p12 —
+#
+#     SecKeychainItemImport: MAC verification failed during PKCS12 import
+#
+# — even though openssl reads the same file without complaint. The password is
+# throwaway: it only protects the file for the few milliseconds it exists in a
+# temp dir that is deleted on exit.
+P12_PASS="pipeline-island-local"
 
-# Import into the login keychain. -T codesign pre-authorises codesign to use the
-# private key so signing itself does not prompt.
+openssl pkcs12 -export \
+    -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+    -out "$TMP/identity.p12" -passout "pass:$P12_PASS" \
+    -name "$CERT_NAME" 2>/dev/null
+
+# -T /usr/bin/codesign pre-authorises codesign to use the private key, so
+# signing itself never prompts.
 security import "$TMP/identity.p12" \
-    -k "$KEYCHAIN" -P "" -A -T /usr/bin/codesign >/dev/null
+    -k "$KEYCHAIN" -P "$P12_PASS" -A -T /usr/bin/codesign >/dev/null
 
-# Trust the certificate for code signing. This is the one step that asks for the
-# login password — once, ever.
-echo
-echo "macOS will now ask for your login password to trust the certificate."
-echo "This happens ONCE. After this, rebuilds no longer prompt."
-echo
-sudo security add-trusted-cert -d -r trustRoot \
-    -p codeSign \
-    -k /Library/Keychains/System.keychain "$TMP/cert.pem"
+echo "  imported into your login keychain"
 
-echo
-echo "done. Verifying:"
-security find-identity -v -p codesigning | grep "$CERT_NAME" || {
-    echo "WARNING: identity not listed as valid for code signing." >&2
+# Mark the certificate as trusted for code signing.
+#
+# This is the only step that needs elevation, and it is genuinely optional:
+# codesign will happily use an untrusted self-signed certificate, and the
+# keychain ACL keys off the certificate either way. Skipping it leaves the app
+# working; it only means `codesign --verify` reports the chain as untrusted.
+if security add-trusted-cert -d -r trustRoot -p codeSign \
+        -k /Library/Keychains/System.keychain "$TMP/cert.pem" 2>/dev/null; then
+    echo "  trusted for code signing"
+else
+    echo "  (not marked trusted — needs admin rights, and is not required)"
+    echo "  to do it later:"
+    echo "    sudo security add-trusted-cert -d -r trustRoot -p codeSign \\"
+    echo "      -k /Library/Keychains/System.keychain <cert>"
+fi
+
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT_NAME"; then
+    echo
+    echo "done:"
+    security find-identity -v -p codesigning | grep "$CERT_NAME"
+    echo
+    echo "Now run:  make app"
+    echo "The first launch asks for keychain access once more — click"
+    echo "'Always Allow'. Rebuilds after that will not ask again."
+else
+    echo
+    echo "The certificate imported but is not listed as valid for code signing." >&2
+    echo "Signing will fall back to ad-hoc, which still works — you will just" >&2
+    echo "keep seeing keychain prompts on rebuild." >&2
     exit 1
-}
-
-echo
-echo "Now run:  make app"
-echo "The first launch will ask for keychain access one final time — click"
-echo "'Always Allow'. Subsequent rebuilds will not ask again."
+fi
