@@ -38,6 +38,16 @@ just gets blocked by Gatekeeper with "is damaged and can't be opened".
 Something you compiled yourself is never quarantined, so the problem doesn't
 arise.
 
+## Updating
+
+```bash
+brew upgrade --cask pipeline-island
+```
+
+The app checks GitHub once a day and puts an "Update available" entry in the
+menu when there's a newer release. It never downloads or installs anything
+itself — Homebrew does that.
+
 ## Settings
 
 **Which projects** — everything you can see, only your own namespace, or pick

@@ -13,6 +13,7 @@ public final class StatusItemController {
     private var pollTask: Task<Void, Never>?
     private var lastMood: IslandMood?
     private var lastCount: Int = -1
+    private var lastUpdate: String?
 
     public init(
         model: IslandModel,
@@ -29,6 +30,7 @@ public final class StatusItemController {
         configureButton()
         rebuildMenu()
         startObserving()
+        UpdateCheck.checkIfDue()
     }
 
     private func configureButton() {
@@ -104,6 +106,19 @@ public final class StatusItemController {
 
         menu.addItem(.separator())
 
+        if let version = UpdateCheck.availableVersion {
+            let update = NSMenuItem(
+                title: "Update available: \(version)",
+                action: #selector(openUpdate),
+                keyEquivalent: ""
+            )
+            update.target = self
+            update.image = NSImage(systemSymbolName: "arrow.down.circle.fill",
+                                   accessibilityDescription: "Update available")
+            menu.addItem(update)
+            menu.addItem(.separator())
+        }
+
         let refresh = NSMenuItem(title: "Refresh Now", action: #selector(refresh), keyEquivalent: "r")
         refresh.target = self
         menu.addItem(refresh)
@@ -144,6 +159,8 @@ public final class StatusItemController {
     }
 
     @objc private func refresh() { onRefresh() }
+
+    @objc private func openUpdate() { UpdateCheck.openReleasePage() }
     @objc private func openSettings() { onOpenSettings() }
     @objc private func quit() { onQuit() }
 
@@ -162,7 +179,9 @@ public final class StatusItemController {
     private func sync() {
         let mood = model.mood
         let count = model.relevantPipelines.count
-        guard mood != lastMood || count != lastCount else { return }
+        let update = UpdateCheck.availableVersion
+        guard mood != lastMood || count != lastCount || update != lastUpdate else { return }
+        lastUpdate = update
         lastMood = mood
         lastCount = count
 
