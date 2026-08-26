@@ -74,20 +74,26 @@ openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
     -days 3650 -config "$TMP/cert.conf" 2>/dev/null
 
-# The PKCS#12 needs a real password. macOS `security import` fails MAC
-# verification on an empty-password p12 —
+# macOS Security.framework only understands the legacy PKCS#12 algorithms:
+# a SHA-1 MAC and 3DES encryption. LibreSSL defaults to a SHA-256 MAC with
+# AES-256-CBC, which produces:
 #
 #     SecKeychainItemImport: MAC verification failed during PKCS12 import
 #
-# — even though openssl reads the same file without complaint. The password is
-# throwaway: it only protects the file for the few milliseconds it exists in a
-# temp dir that is deleted on exit.
+# The message blames the password, which is misleading — the password is fine,
+# the MAC algorithm is unreadable. `-macalg sha1` plus the two `PBE-SHA1-3DES`
+# flags are what actually matter here.
+#
+# The password itself is also required: `security import` rejects an
+# empty-password p12 with the same error. It is throwaway, protecting the file
+# for the moment it exists in a temp dir that is deleted on exit.
 P12_PASS="pipeline-island-local"
 
 openssl pkcs12 -export \
     -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
     -out "$TMP/identity.p12" -passout "pass:$P12_PASS" \
-    -name "$CERT_NAME" 2>/dev/null
+    -name "$CERT_NAME" \
+    -macalg sha1 -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES 2>/dev/null
 
 # -T /usr/bin/codesign pre-authorises codesign to use the private key, so
 # signing itself never prompts.
