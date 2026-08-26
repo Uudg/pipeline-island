@@ -30,6 +30,9 @@ enum PipelineIslandApp {
         case "--snapshot-multi":
             let outMulti = arguments.count > 2 ? arguments[2] : "island-multi.png"
             launchUI(snapshotPath: outMulti, snapshotMulti: true)
+        case "--diagnose":
+            Diagnostics.run()
+            exit(0)
         case "--login-status":
             // Report SMAppService state, for verifying launch-at-login works
             // from inside a real bundle.
