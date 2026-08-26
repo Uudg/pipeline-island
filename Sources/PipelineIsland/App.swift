@@ -30,6 +30,11 @@ enum PipelineIslandApp {
         case "--snapshot-multi":
             let outMulti = arguments.count > 2 ? arguments[2] : "island-multi.png"
             launchUI(snapshotPath: outMulti, snapshotMulti: true)
+        case "--login-status":
+            // Report SMAppService state, for verifying launch-at-login works
+            // from inside a real bundle.
+            LaunchAtLogin.printStatus()
+            exit(0)
         case "--record":
             // Record the island to a PNG sequence for the README demo.
             NotchGeometry.simulateNotch = true

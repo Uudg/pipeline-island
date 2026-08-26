@@ -44,9 +44,10 @@ EOF
     exit 1
 fi
 
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT_NAME"; then
-    echo "signing identity '$CERT_NAME' already exists:"
-    security find-identity -v -p codesigning | grep "$CERT_NAME"
+# Note: `find-identity -v` lists only TRUSTED identities, and this certificate
+# is deliberately untrusted. Check the certificate itself instead.
+if security find-certificate -c "$CERT_NAME" >/dev/null 2>&1; then
+    echo "signing identity '$CERT_NAME' already exists"
     exit 0
 fi
 
@@ -118,18 +119,40 @@ else
     echo "      -k /Library/Keychains/System.keychain <cert>"
 fi
 
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$CERT_NAME"; then
+# Verify by actually signing something, which is the only test that matters.
+# `find-identity -v` reports 0 valid identities for an untrusted certificate
+# even though codesign uses it without complaint.
+PROBE=$(mktemp -d)
+mkdir -p "$PROBE/Probe.app/Contents/MacOS"
+printf 'int main(){return 0;}' > "$PROBE/t.c"
+cc -o "$PROBE/Probe.app/Contents/MacOS/Probe" "$PROBE/t.c" 2>/dev/null
+cat > "$PROBE/Probe.app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.pipelineisland.signprobe</string>
+<key>CFBundleExecutable</key><string>Probe</string>
+</dict></plist>
+PLIST
+
+if codesign --force --sign "$CERT_NAME" "$PROBE/Probe.app" >/dev/null 2>&1; then
+    REQUIREMENT=$(codesign -d -r- "$PROBE/Probe.app" 2>&1 | tail -1)
+    rm -rf "$PROBE"
     echo
-    echo "done:"
-    security find-identity -v -p codesigning | grep "$CERT_NAME"
+    echo "done. Signing now produces:"
+    echo "  $REQUIREMENT"
+    echo
+    echo "That keys off the certificate rather than the binary hash, so it"
+    echo "survives rebuilds."
     echo
     echo "Now run:  make app"
     echo "The first launch asks for keychain access once more — click"
     echo "'Always Allow'. Rebuilds after that will not ask again."
 else
+    rm -rf "$PROBE"
     echo
-    echo "The certificate imported but is not listed as valid for code signing." >&2
-    echo "Signing will fall back to ad-hoc, which still works — you will just" >&2
+    echo "The certificate imported but codesign cannot use it." >&2
+    echo "Signing falls back to ad-hoc, which still works — you will just" >&2
     echo "keep seeing keychain prompts on rebuild." >&2
     exit 1
 fi

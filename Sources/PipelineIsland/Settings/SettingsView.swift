@@ -57,6 +57,8 @@ struct SettingsView: View {
     @State private var groups: [GitLabGroup] = []
     @State private var isLoadingGroups = false
     @State private var username: String?
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var launchError: String?
 
     enum TokenStatus: Equatable {
         case unknown
@@ -112,6 +114,7 @@ struct SettingsView: View {
         .onAppear {
             checkToken()
             loadGroups()
+            launchAtLogin = LaunchAtLogin.isEnabled
         }
     }
 
@@ -280,6 +283,35 @@ struct SettingsView: View {
             }
 
             Divider().padding(.vertical, 4)
+
+            Toggle(isOn: Binding(
+                get: { launchAtLogin },
+                set: { wanted in
+                    switch LaunchAtLogin.set(wanted) {
+                    case .success(let actual):
+                        launchAtLogin = actual
+                        launchError = nil
+                    case .failure(let error):
+                        launchAtLogin = LaunchAtLogin.isEnabled
+                        launchError = error.localizedDescription
+                    }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Launch at login")
+                        .font(.system(size: 12, weight: .medium))
+                    Text(launchError ?? LaunchAtLogin.statusDescription)
+                        .font(.caption)
+                        .foregroundStyle(launchError == nil ? Color.secondary.opacity(0.7) : Color.red)
+                }
+            }
+            .toggleStyle(.switch)
+
+            if LaunchAtLogin.wasDeniedBySystem {
+                Button("Open Login Items…") { LaunchAtLogin.openSystemSettings() }
+                    .controlSize(.small)
+                    .padding(.leading, 2)
+            }
 
             Toggle(isOn: $preferences.haptics) {
                 VStack(alignment: .leading, spacing: 1) {

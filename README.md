@@ -62,6 +62,10 @@ menu bar.
 **Haptics** — a tap when something starts, passes, or fails. Needs a Force Touch
 trackpad.
 
+**Launch at login** — registers with macOS via `SMAppService`. It shows up in
+System Settings → General → Login Items, and turning it off there wins: the
+app reads the system state rather than its own preference.
+
 Your token goes in the macOS Keychain, never to disk. The app asks for keychain
 access on first launch; that prompt is the whole point.
 

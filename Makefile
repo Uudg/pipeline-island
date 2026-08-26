@@ -27,7 +27,7 @@ app: build
 	@# requirement is the binary's cdhash, which changes on EVERY rebuild, so
 	@# macOS treats each build as a new app and re-prompts for the password.
 	@# A certificate-based requirement is stable. See scripts/create-signing-identity.sh
-	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "Pipeline Island Dev"; then \
+	@if security find-certificate -c "Pipeline Island Dev" >/dev/null 2>&1; then \
 		codesign --force --sign "Pipeline Island Dev" --identifier "com.pipelineisland.app" "$(APP)" 2>/dev/null \
 			&& echo "  signed with 'Pipeline Island Dev' (stable identity)"; \
 	else \
