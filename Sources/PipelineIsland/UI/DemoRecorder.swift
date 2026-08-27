@@ -17,18 +17,33 @@ final class DemoRecorder {
     private let fps: Int
     private let duration: TimeInterval
 
+    private let hasNotch: Bool
     private var frameIndex = 0
     private var timer: Timer?
     private var started = Date()
     private var hostingView: NSHostingView<AnyView>?
 
-    /// Canvas size. 2x for a crisp result on a retina README.
-    private let size = CGSize(width: 900, height: 320)
+    /// Canvas size.
+    ///
+    /// The notched stage renders at true 16" MacBook width (1728pt) so the
+    /// panel covers the same fraction of the frame as it does on real
+    /// hardware — at 900pt it took 69% of the width and swallowed the menu
+    /// bar. ffmpeg downscales for the GIF.
+    private var size: CGSize {
+        hasNotch ? CGSize(width: 1728, height: 300) : CGSize(width: 900, height: 320)
+    }
     private let scale: CGFloat = 2
 
-    init(model: IslandModel, outputDirectory: URL, fps: Int = 25, duration: TimeInterval = 22) {
+    init(
+        model: IslandModel,
+        outputDirectory: URL,
+        hasNotch: Bool = false,
+        fps: Int = 20,
+        duration: TimeInterval = 18
+    ) {
         self.model = model
         self.outputDirectory = outputDirectory
+        self.hasNotch = hasNotch
         self.fps = fps
         self.duration = duration
     }
@@ -36,7 +51,7 @@ final class DemoRecorder {
     func start() {
         try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
-        let stage = DemoStage(model: model)
+        let stage = DemoStage(model: model, hasNotch: hasNotch, width: size.width, height: size.height)
         let host = NSHostingView(rootView: AnyView(stage))
         host.frame = CGRect(origin: .zero, size: size)
 
@@ -97,6 +112,13 @@ final class DemoRecorder {
 /// anyone's actual desktop.
 private struct DemoStage: View {
     @Bindable var model: IslandModel
+    /// Draw a MacBook top bezel with a real cutout, rather than a plain strip.
+    var hasNotch: Bool = false
+
+    var width: CGFloat = 900
+    var height: CGFloat = 320
+    private var notchWidth: CGFloat { hasNotch ? 185 : 0 }
+    private var menuBarHeight: CGFloat { hasNotch ? 32 : 28 }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -109,30 +131,74 @@ private struct DemoStage: View {
                 endPoint: .bottom
             )
 
-            // Menu bar strip, with the usual clock on the right so the scale
-            // reads correctly.
-            HStack {
-                Spacer()
-                Text("Fri 14:52")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(.trailing, 14)
+            if hasNotch {
+                notchedMenuBar
+            } else {
+                plainMenuBar
             }
-            .frame(height: 28)
-            .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(0.25))
 
             // The island itself, at the top centre where it really sits.
             IslandView(
                 model: model,
-                hasNotch: false,
-                notchHeight: 0,
-                notchWidth: 0,
+                hasNotch: hasNotch,
+                notchHeight: hasNotch ? menuBarHeight : 0,
+                notchWidth: hasNotch ? notchWidth : 0,
                 onOpen: { _ in },
                 onQuit: {}
             )
-            .frame(width: 900, height: 292, alignment: .top)
+            .frame(width: width, height: height - 28, alignment: .top)
         }
-        .frame(width: 900, height: 320)
+        .frame(width: width, height: height)
+    }
+
+    /// Menu bar for a display without a cutout.
+    private var plainMenuBar: some View {
+        HStack {
+            Spacer()
+            Text("Fri 14:52")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.55))
+                .padding(.trailing, 14)
+        }
+        .frame(height: menuBarHeight)
+        .frame(maxWidth: .infinity)
+        .background(Color.black.opacity(0.25))
+    }
+
+    /// Menu bar split around a physical cutout, as on a MacBook.
+    ///
+    /// The menu items sit in the auxiliary strips either side of the notch,
+    /// which is what makes the island reading as "part of the hardware" land.
+    private var notchedMenuBar: some View {
+        HStack(spacing: 0) {
+            // Left strip: app menus.
+            HStack(spacing: 14) {
+                Text("").font(.system(size: 13))
+                Text("Xcode").font(.system(size: 12, weight: .semibold))
+                Text("File").font(.system(size: 12))
+                Text("Edit").font(.system(size: 12))
+                Spacer()
+            }
+            .foregroundStyle(.white.opacity(0.72))
+            .padding(.leading, 16)
+            .frame(width: (width - notchWidth) / 2)
+
+            // The cutout itself: opaque hardware.
+            Color.black.frame(width: notchWidth)
+
+            // Right strip: status items and clock.
+            HStack(spacing: 13) {
+                Spacer()
+                Image(systemName: "wifi")
+                Image(systemName: "battery.75")
+                Text("Fri 14:52").font(.system(size: 12))
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.white.opacity(0.72))
+            .padding(.trailing, 16)
+            .frame(width: (width - notchWidth) / 2)
+        }
+        .frame(height: menuBarHeight)
+        .background(Color.black.opacity(0.28))
     }
 }

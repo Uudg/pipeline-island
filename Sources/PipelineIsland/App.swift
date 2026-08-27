@@ -38,6 +38,10 @@ enum PipelineIslandApp {
             // from inside a real bundle.
             LaunchAtLogin.printStatus()
             exit(0)
+        case "--record-notch":
+            NotchGeometry.simulateNotch = true
+            let notchDir = arguments.count > 2 ? arguments[2] : "demo-frames-notch"
+            launchUI(demo: true, recordTo: notchDir, recordNotch: true)
         case "--record":
             // Record the island to a PNG sequence for the README demo.
             NotchGeometry.simulateNotch = true
@@ -51,17 +55,17 @@ enum PipelineIslandApp {
         case "--verify-ui":
             launchUI(verifyOnly: true)
         default:
-            print("usage: PipelineIsland [run | --demo | --demo-notch | --record <dir> | --verify-ui | --snapshot <path> | store <PAT> | migrate | delete | verify]")
+            print("usage: PipelineIsland [run | --demo | --demo-notch | --record <dir> | --record-notch <dir> | --verify-ui | --snapshot <path> | store <PAT> | migrate | delete | verify]")
             exit(1)
         }
     }
 
     @MainActor
-    private static func launchUI(verifyOnly: Bool = false, snapshotPath: String? = nil, demo: Bool = false, recordTo: String? = nil, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
+    private static func launchUI(verifyOnly: Bool = false, snapshotPath: String? = nil, demo: Bool = false, recordTo: String? = nil, recordNotch: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
-        let delegate = AppDelegate(verifyOnly: verifyOnly, snapshotPath: snapshotPath, demo: demo, recordTo: recordTo, snapshotMulti: snapshotMulti, snapshotFailure: snapshotFailure, snapshotNotch: snapshotNotch)
+        let delegate = AppDelegate(verifyOnly: verifyOnly, snapshotPath: snapshotPath, demo: demo, recordTo: recordTo, recordNotch: recordNotch, snapshotMulti: snapshotMulti, snapshotFailure: snapshotFailure, snapshotNotch: snapshotNotch)
         app.delegate = delegate
         app.run()
     }
@@ -85,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let snapshotPath: String?
     private let demo: Bool
     private let recordTo: String?
+    private let recordNotch: Bool
     private let snapshotMulti: Bool
     private let snapshotFailure: Bool
     private let snapshotNotch: Bool
@@ -94,11 +99,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var settingsWindow: SettingsWindowController?
 
-    init(verifyOnly: Bool, snapshotPath: String?, demo: Bool = false, recordTo: String? = nil, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
+    init(verifyOnly: Bool, snapshotPath: String?, demo: Bool = false, recordTo: String? = nil, recordNotch: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         self.verifyOnly = verifyOnly
         self.snapshotPath = snapshotPath
         self.demo = demo
         self.recordTo = recordTo
+        self.recordNotch = recordNotch
         self.snapshotMulti = snapshotMulti
         self.snapshotFailure = snapshotFailure
         self.snapshotNotch = snapshotNotch
@@ -145,10 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("demo mode: scripted pipelines, no GitLab calls")
             TokenCache.shared.isDisabled = true
             if let recordTo {
-                demoTask = DemoData.runForRecording(model: model)
+                demoTask = recordNotch
+                    ? DemoData.runForNotchRecording(model: model)
+                    : DemoData.runForRecording(model: model)
                 recorder = DemoRecorder(
                     model: model,
-                    outputDirectory: URL(fileURLWithPath: recordTo)
+                    outputDirectory: URL(fileURLWithPath: recordTo),
+                    hasNotch: recordNotch
                 )
                 recorder?.start()
                 return

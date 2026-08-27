@@ -138,6 +138,55 @@ public enum DemoData {
         return MonitorState(projects: projects, lastUpdate: now, error: nil, isPolling: true)
     }
 
+    /// Recording script for a notched Mac.
+    ///
+    /// The notchless script opens with several seconds of collapsed pill, which
+    /// reads fine as a pill but is just a black rectangle on a bezel. Here the
+    /// island expands almost immediately and stays open, because the point of
+    /// the notch recording is the notch *growing into* a panel.
+    static func runForNotchRecording(model: IslandModel) -> Task<Void, Never> {
+        Task { @MainActor in
+            let start = Date()
+            func at(_ seconds: TimeInterval) async {
+                let wait = start.addingTimeInterval(seconds).timeIntervalSinceNow
+                if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+            }
+
+            model.apply(MonitorState(projects: [], lastUpdate: Date(), error: nil, isPolling: true))
+
+            let project = "acme/web-app"
+            let ref = "staging"
+
+            // Arrive as a bare notch, so the transition is visible.
+            await at(1.2)
+            model.apply(state(frame: script[0], project: project, iid: "442", ref: ref,
+                              startedAt: start.addingTimeInterval(-4)))
+
+            // Expand out of the cutout — the money shot.
+            await at(2.8)
+            withAnimation(Motion.expand) { model.isExpanded = true }
+
+            // Run the stages while open, so progress is legible.
+            for (index, frame) in script.enumerated().dropFirst() {
+                await at(3.6 + Double(index) * 1.7)
+                model.apply(state(frame: frame, project: project, iid: "442", ref: ref,
+                                  startedAt: start.addingTimeInterval(-4)))
+            }
+
+            // Collapse back into the notch.
+            await at(11.5)
+            withAnimation(Motion.collapse) { model.isExpanded = false }
+
+            // A failure arrives and expands on its own.
+            await at(13.5)
+            model.apply(state(frame: failScript[failScript.count - 1], project: "acme/notifier",
+                              iid: "13", ref: "fix/webhook-retry",
+                              startedAt: start.addingTimeInterval(-40)))
+            await at(14.8)
+            withAnimation(Motion.expand) { model.isExpanded = true }
+        }
+    }
+
     /// A condensed script for the README recording.
     ///
     /// The normal demo loop runs ~65s, which is far too long for a GIF. This

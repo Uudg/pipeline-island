@@ -2,11 +2,15 @@
 
 GitLab CI pipelines, live in the macOS notch.
 
-![Pipeline Island in action](docs/media/demo.gif)
+![Pipeline Island in the notch](docs/media/demo-notch.gif)
 
 The island shows up when a pipeline starts, tracks it stage by stage, and
 disappears when it's done. Hover for the full breakdown, click to open the run
-in GitLab. On a display without a notch it sits under the menu bar instead.
+in GitLab.
+
+On a display without a notch it sits under the menu bar instead, as a pill:
+
+![Pipeline Island on an external display](docs/media/demo.gif)
 
 macOS 14+, Swift 6, no third-party dependencies.
 
