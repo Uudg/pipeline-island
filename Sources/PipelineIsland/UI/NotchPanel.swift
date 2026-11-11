@@ -72,6 +72,7 @@ public final class NotchPanelController {
 
     private var currentPlacement: NotchGeometry.Placement?
     private var observers: [NSObjectProtocol] = []
+    private var appearanceObservation: NSKeyValueObservation?
 
     /// Intended visibility, which differs from `panel.isVisible` mid-fade.
     private var isShown = false
@@ -107,14 +108,35 @@ public final class NotchPanelController {
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         panel.animationBehavior = .none
+        // Never pin the panel — paint-time colours follow the effective appearance.
+        panel.appearance = nil
 
         hostingView = PassthroughHostingView(rootView: AnyView(EmptyView()))
         hostingView.autoresizingMask = [.width, .height]
         panel.contentView = hostingView
 
         reposition()
+        applyAppearancePreference()
         updateRootView()
         observeScreenChanges()
+        observeAppearanceChanges()
+    }
+
+    /// Rebuild the hosting tree so Theme Auto/Light/Dark takes effect.
+    /// Never pins `NSApp.appearance` or `panel.appearance`. The override
+    /// lives on the hosting view so paint-time colours see the right scheme.
+    public func applyAppearancePreference() {
+        NSApp.appearance = nil
+        panel.appearance = nil
+        switch Preferences.shared.appearance {
+        case .auto:
+            hostingView.appearance = nil
+        case .light:
+            hostingView.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            hostingView.appearance = NSAppearance(named: .darkAqua)
+        }
+        updateRootView()
     }
 
     /// Drop the notification observers.
@@ -123,10 +145,13 @@ public final class NotchPanelController {
             NotificationCenter.default.removeObserver(observer)
         }
         observers.removeAll()
+        appearanceObservation?.invalidate()
+        appearanceObservation = nil
     }
 
     /// Corner treatment differs under a cutout, so rebuild the root view when it changes.
     private func updateRootView() {
+        let scheme = Preferences.shared.appearance.preferredColorScheme
         hostingView.rootView = AnyView(
             IslandView(
                 model: model,
@@ -139,6 +164,7 @@ public final class NotchPanelController {
                     self?.setExpanded(hovering)
                 }
             )
+            .preferredColorScheme(scheme)
         )
     }
 
@@ -276,5 +302,17 @@ public final class NotchPanelController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.reposition() }
         })
+    }
+
+    /// OS Light/Dark flips must repaint the island without a relaunch.
+    private func observeAppearanceChanges() {
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.panel.appearance = nil
+                self.hostingView.needsDisplay = true
+                self.updateRootView()
+            }
+        }
     }
 }
