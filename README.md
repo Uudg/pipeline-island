@@ -73,13 +73,18 @@ app reads the system state rather than its own preference.
 Your token goes in the macOS Keychain, never to disk. The app asks for keychain
 access on first launch; that prompt is the whole point.
 
+For self-hosted GitLab, **API Host** controls data requests. **Web Host**
+controls links opened in the browser and defaults to API Host. Set both to the
+same origin unless split DNS or an access proxy requires separate addresses.
+
 ## Development
 
 ```bash
 make run          # build and launch
+make test         # URL and model regression tests
 make demo         # fake pipelines: no network, no keychain, no CI minutes
 make demo-notch   # same, with a simulated notch (useful lid-closed)
-make spikes       # regression suite
+make spikes       # live API and geometry verification scripts
 ```
 
 `make demo` exists because a real pipeline takes ~100 seconds and burns CI

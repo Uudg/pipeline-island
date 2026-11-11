@@ -17,6 +17,8 @@ public enum NotchGeometry {
         case builtIn
         /// The screen with a notch, if any is attached.
         case notched
+        /// Any display that isn't the built-in / notched one — the external monitor(s).
+        case external
     }
 
     public struct Placement: Sendable, Equatable {
@@ -108,6 +110,10 @@ public enum NotchGeometry {
             return screens.first(where: isBuiltIn) ?? NSScreen.main ?? screens.first
         case .notched:
             return screens.first(where: { $0.safeAreaInsets.top > 0 })
+                ?? NSScreen.main
+                ?? screens.first
+        case .external:
+            return screens.first(where: { !isBuiltIn($0) })
                 ?? NSScreen.main
                 ?? screens.first
         }

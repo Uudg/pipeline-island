@@ -64,10 +64,34 @@ enum PipelineIslandApp {
     private static func launchUI(verifyOnly: Bool = false, snapshotPath: String? = nil, demo: Bool = false, recordTo: String? = nil, recordNotch: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        // Never pin the app — Theme Auto/Light/Dark is content-scoped only.
+        app.appearance = nil
+        // Accessory apps have no menu bar, but ⌘X/C/V/A in text fields are
+        // routed through the main menu's key equivalents — so install one.
+        app.mainMenu = editOnlyMainMenu()
 
         let delegate = AppDelegate(verifyOnly: verifyOnly, snapshotPath: snapshotPath, demo: demo, recordTo: recordTo, recordNotch: recordNotch, snapshotMulti: snapshotMulti, snapshotFailure: snapshotFailure, snapshotNotch: snapshotNotch)
         app.delegate = delegate
         app.run()
+    }
+
+    @MainActor
+    private static func editOnlyMainMenu() -> NSMenu {
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let editItem = NSMenuItem()
+        editItem.submenu = edit
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem()) // app menu slot
+        menu.addItem(editItem)
+        return menu
     }
 }
 
@@ -98,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferencesTask: Task<Void, Never>?
     private var statusItem: StatusItemController?
     private var settingsWindow: SettingsWindowController?
+    private var appearanceObserver: NSObjectProtocol?
 
     init(verifyOnly: Bool, snapshotPath: String?, demo: Bool = false, recordTo: String? = nil, recordNotch: Bool = false, snapshotMulti: Bool = false, snapshotFailure: Bool = false, snapshotNotch: Bool = false) {
         self.verifyOnly = verifyOnly
@@ -192,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Push preference changes into the parts of the app that read them.
     private func observePreferences() {
         var lastScreen = Preferences.shared.screenPreference
+        var lastAppearance = Preferences.shared.appearance
         var lastScope = Preferences.shared.scope
         var lastGroups = Preferences.shared.selectedGroups
         var lastAuthor = Preferences.shared.authorScope
@@ -199,6 +225,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Push the stored scope in immediately, before the first poll lands.
         applyScope()
+
+        appearanceObserver = NotificationCenter.default.addObserver(
+            forName: .pipelineIslandAppearanceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                lastAppearance = Preferences.shared.appearance
+                self?.panelController?.applyAppearancePreference()
+            }
+        }
 
         preferencesTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -209,6 +246,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if screen != lastScreen {
                     lastScreen = screen
                     self.panelController?.screenPreference = screen
+                }
+
+                let appearance = Preferences.shared.appearance
+                if appearance != lastAppearance {
+                    lastAppearance = appearance
+                    self.panelController?.applyAppearancePreference()
                 }
 
                 let scope = Preferences.shared.scope
@@ -234,6 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesTask?.cancel()
         demoTask?.cancel()
         statusItem?.invalidate()
+        if let appearanceObserver {
+            NotificationCenter.default.removeObserver(appearanceObserver)
+        }
     }
 
     // MARK: - Monitor wiring
@@ -296,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
 
     private func open(_ pipeline: Pipeline) {
-        guard let url = pipeline.webURL() else { return }
+        guard let url = pipeline.webURL(host: Preferences.shared.webHost) else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -327,12 +373,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rasterise the collapsed + expanded pair and write it out.
     @MainActor
     private func writeSnapshot(to path: String) {
+        let scheme = Preferences.shared.appearance.preferredColorScheme
         let restWidth: CGFloat = snapshotNotch ? 190 : 520
-        let collapsed = Self.render(model: model, expanded: false, width: restWidth,
-                                    hasNotch: snapshotNotch)
+        let collapsed = Self.render(
+            model: model, expanded: false, width: restWidth,
+            hasNotch: snapshotNotch, colorScheme: scheme
+        )
         model.isExpanded = true
-        let expanded = Self.render(model: model, expanded: true, width: 620,
-                                   hasNotch: snapshotNotch)
+        let expanded = Self.render(
+            model: model, expanded: true, width: 620,
+            hasNotch: snapshotNotch, colorScheme: scheme
+        )
 
         let stacked = Self.stack([collapsed, expanded].compactMap { $0 })
         guard let image = stacked,
@@ -344,7 +395,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         do {
             try png.write(to: URL(fileURLWithPath: path))
-            print("snapshot written: \(path) (\(Int(image.size.width))x\(Int(image.size.height)))")
+            let schemeLabel: String = {
+                switch scheme {
+                case .some(.dark): return "dark"
+                case .some(.light): return "light"
+                case .none: return "auto"
+                @unknown default: return "auto"
+                }
+            }()
+            print("snapshot written: \(path) (\(Int(image.size.width))x\(Int(image.size.height))) theme=\(schemeLabel)")
             print("pipelines=\(model.state.pipelines.count) live=\(model.relevantPipelines.count) mood=\(model.mood)")
             exit(0)
         } catch {
@@ -354,9 +413,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Rasterise the island view at a fixed width.
-    private static func render(model: IslandModel, expanded: Bool, width: CGFloat, hasNotch: Bool = false) -> NSImage? {
+    private static func render(
+        model: IslandModel,
+        expanded: Bool,
+        width: CGFloat,
+        hasNotch: Bool = false,
+        colorScheme: ColorScheme? = Preferences.shared.appearance.preferredColorScheme
+    ) -> NSImage? {
         model.isOnScreen = true
 
+        // preferredColorScheme must wrap IslandView from outside so its body
+        // sees the overridden @Environment(\.colorScheme) on first paint.
         let view = IslandView(
             model: model,
             hasNotch: hasNotch,
@@ -365,7 +432,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpen: { _ in },
             onQuit: {}
         )
+        .preferredColorScheme(colorScheme)
+
         let host = NSHostingView(rootView: AnyView(view))
+        // Offscreen renders have no window appearance — pin the hosting view
+        // so Light/Dark snapshots actually diverge.
+        switch colorScheme {
+        case .some(.light):
+            host.appearance = NSAppearance(named: .aqua)
+        case .some(.dark):
+            host.appearance = NSAppearance(named: .darkAqua)
+        case .none:
+            host.appearance = NSApp.effectiveAppearance
+        @unknown default:
+            host.appearance = NSApp.effectiveAppearance
+        }
         let height = host.fittingSize.height > 0 ? host.fittingSize.height : (expanded ? 300 : 32)
         host.frame = CGRect(x: 0, y: 0, width: width, height: height)
         host.layoutSubtreeIfNeeded()
@@ -506,12 +587,13 @@ enum CommandLineHarness {
         }
     }
 
+    @MainActor
     private static func verifyToken() async -> Int32 {
         guard TokenCache.shared.token() != nil else {
             print("No token in Keychain. Run: PipelineIsland store <PAT>")
             return 1
         }
-        let client = GitLabClient()
+        let client = GitLabClient(endpoint: GitLabClient.endpoint(for: Preferences.shared.host))
         do {
             let username = try await client.verifyToken()
             print("token OK — authenticated as \(username)")
