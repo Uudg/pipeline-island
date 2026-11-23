@@ -7,12 +7,15 @@ BUILDDIR := .build/$(CONFIG)
 APP      := $(BUILDDIR)/$(BINARY).app
 CONTENTS := $(APP)/Contents
 
-.PHONY: all build app run clean verify verify-ui watch spikes
+.PHONY: all build test app run clean verify verify-ui watch spikes
 
 all: app
 
 build:
 	swift build -c $(CONFIG)
+
+test:
+	swift test
 
 # Assemble a minimal LSUIElement app bundle around the built executable.
 app: build

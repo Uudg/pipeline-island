@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -9,7 +10,9 @@ public final class Preferences {
 
     private enum Key {
         static let host = "gitlab.host"
+        static let webHost = "gitlab.webHost"
         static let screenPreference = "island.screen"
+        static let appearance = "island.appearance"
         static let scope = "pipelines.scope"
         static let selectedGroups = "pipelines.groups"
         static let username = "account.username"
@@ -21,10 +24,21 @@ public final class Preferences {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.host = defaults.string(forKey: Key.host) ?? "https://gitlab.com"
+        let host = defaults.string(forKey: Key.host) ?? "https://gitlab.com"
+        self.host = host
+        self.webHost = defaults.string(forKey: Key.webHost) ?? host
         self.screenPreference = NotchGeometry.ScreenPreference(
             rawValue: defaults.string(forKey: Key.screenPreference) ?? ""
         ) ?? .primary
+        // Env wins for snapshot/CI: PIPELINE_ISLAND_THEME=light|dark|auto
+        if let env = ProcessInfo.processInfo.environment["PIPELINE_ISLAND_THEME"],
+           let forced = AppearancePreference(rawValue: env) {
+            self.appearance = forced
+        } else {
+            self.appearance = AppearancePreference(
+                rawValue: defaults.string(forKey: Key.appearance) ?? ""
+            ) ?? .auto
+        }
         self.scope = PipelineScope(rawValue: defaults.string(forKey: Key.scope) ?? "") ?? .all
         self.selectedGroups = Set(defaults.stringArray(forKey: Key.selectedGroups) ?? [])
         self.username = defaults.string(forKey: Key.username)
@@ -37,9 +51,22 @@ public final class Preferences {
         didSet { defaults.set(host, forKey: Key.host) }
     }
 
+    /// Browser-facing GitLab origin. May differ from the API host on split-DNS setups.
+    public var webHost: String {
+        didSet { defaults.set(webHost, forKey: Key.webHost) }
+    }
+
     /// Which display the island renders on.
     public var screenPreference: NotchGeometry.ScreenPreference {
         didSet { defaults.set(screenPreference.rawValue, forKey: Key.screenPreference) }
+    }
+
+    /// Island chrome: follow the OS, or force Light / Dark.
+    ///
+    /// Never assigned to `NSApp.appearance` — overrides apply only via
+    /// `preferredColorScheme` on the island content.
+    public var appearance: AppearancePreference {
+        didSet { defaults.set(appearance.rawValue, forKey: Key.appearance) }
     }
 
     /// Which projects the island reports on.
@@ -69,5 +96,4 @@ public final class Preferences {
     public var authorScope: PipelineAuthorScope {
         didSet { defaults.set(authorScope.rawValue, forKey: Key.authorScope) }
     }
-
 }

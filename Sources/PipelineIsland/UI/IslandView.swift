@@ -15,8 +15,18 @@ struct IslandView: View {
     /// Routed through the controller so the resize is sequenced around the animation.
     var onHoverChange: (Bool) -> Void = { _ in }
 
+    /// Paint-time scheme — never cache a palette from `init` / launch.
+    /// Theme Auto/Light/Dark is applied by the parent via `.preferredColorScheme`
+    /// (must be outside this view — applying it here does not affect this body).
+    @Environment(\.colorScheme) private var colorScheme
+
     /// True while animating out; selects the gentler exit geometry.
     private var isLeaving: Bool { model.isLeaving }
+
+    /// Resolved against the current drawing appearance on every body evaluation.
+    private var palette: IslandPalette {
+        .resolved(colorScheme: colorScheme, hasNotch: hasNotch)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,7 +48,7 @@ struct IslandView: View {
             } else {
                 collapsed
                 if model.isExpanded {
-                    Divider().opacity(0.35)
+                    Divider().opacity(palette.isDark ? 0.35 : 0.20)
                     expanded
                 }
             }
@@ -48,10 +58,13 @@ struct IslandView: View {
         .background(background)
         .clipShape(shape)
         .overlay(
-            shape.strokeBorder(Color.white.opacity(hasNotch ? 0 : 0.08), lineWidth: 1)
+            shape.strokeBorder(hasNotch ? Color.clear : palette.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(model.isExpanded ? 0.35 : 0.2),
-                radius: model.isExpanded ? 18 : 8, y: 4)
+        .shadow(
+            color: palette.shadow.opacity(model.isExpanded ? 1 : 0.65),
+            radius: model.isExpanded ? 18 : 8,
+            y: 4
+        )
         .scaleEffect(
             x: model.isOnScreen ? 1 : (isLeaving ? 0.97 : 0.86),
             y: model.isOnScreen ? 1 : (isLeaving ? 0.80 : 0.55),
@@ -75,6 +88,7 @@ struct IslandView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .allowsHitTesting(true)
+        .environment(\.islandPalette, palette)
         .animation(Motion.content, value: model.state.signature)
         .animation(Motion.expand, value: model.isExpanded)
     }
@@ -97,21 +111,21 @@ struct IslandView: View {
             Spacer(minLength: 0)
             if let pipeline = model.headline {
                 if pipeline.isActive {
-                    ActivityGlyph(color: StatusStyle.color(for: pipeline.status))
+                    ActivityGlyph(color: palette.color(for: pipeline.status))
                 } else {
                     Image(systemName: StatusStyle.symbol(for: pipeline.status))
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(StatusStyle.color(for: pipeline.status))
+                        .foregroundStyle(palette.color(for: pipeline.status))
                 }
                 if model.relevantPipelines.count > 1 {
                     Text("\(model.relevantPipelines.count)")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .foregroundStyle(palette.secondaryText)
                 }
             } else if model.state.error != nil {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(palette.warning)
             }
             Spacer(minLength: 0)
         }
@@ -139,10 +153,10 @@ struct IslandView: View {
 
     private var background: some View {
         ZStack {
-            Color.black.opacity(hasNotch ? 1.0 : 0.92)
+            hasNotch ? palette.backgroundSolid : palette.background
             if !hasNotch {
-                VisualEffectBackground()
-                    .opacity(0.35)
+                VisualEffectBackground(light: !palette.isDark)
+                    .opacity(palette.isDark ? 0.35 : 0.55)
             }
         }
     }
@@ -156,11 +170,11 @@ struct IslandView: View {
                 HStack(spacing: 7) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(palette.warning)
                         .frame(width: 13)
                     Text(error)
                         .font(.system(size: 11))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(palette.warning)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 2)
@@ -172,11 +186,11 @@ struct IslandView: View {
                 HStack(spacing: 7) {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.25))
+                        .foregroundStyle(palette.idle)
                         .frame(width: 13)
                     Text("no pipelines running")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(palette.tertiaryText)
                     Spacer(minLength: 2)
                 }
                 .padding(.horizontal, 12)
@@ -186,7 +200,7 @@ struct IslandView: View {
                 ForEach(Array(model.collapsedPipelines.enumerated()), id: \.element.id) { index, pipeline in
                     if index > 0 {
                         Divider()
-                            .opacity(0.14)
+                            .opacity(palette.isDark ? 0.14 : 0.10)
                             .padding(.horizontal, 10)
                     }
                     PipelineLine(
@@ -208,7 +222,7 @@ struct IslandView: View {
                         Spacer()
                         Text("+\(model.hiddenPipelineCount) more — hover to see all")
                             .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.4))
+                            .foregroundStyle(palette.tertiaryText)
                         Spacer()
                     }
                     .frame(height: 18)
@@ -221,15 +235,15 @@ struct IslandView: View {
         Group {
             switch model.mood {
             case .running:
-                ActivityGlyph(color: .blue)
+                ActivityGlyph(color: palette.running)
             case .failed:
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                Image(systemName: "xmark.circle.fill").foregroundStyle(palette.failure)
             case .success:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.success)
             case .error:
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.warning)
             case .idle:
-                Image(systemName: "circle.fill").foregroundStyle(.white.opacity(0.25))
+                Image(systemName: "circle.fill").foregroundStyle(palette.idle)
             }
         }
         .font(.system(size: 11, weight: .bold))
@@ -258,13 +272,13 @@ struct IslandView: View {
             if model.expandedDetail.isEmpty {
                 Text(model.state.error ?? "Nothing running right now.")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .transition(.opacity)
             }
 
-            Divider().opacity(0.25).padding(.vertical, 2)
+            Divider().opacity(palette.isDark ? 0.25 : 0.15).padding(.vertical, 2)
 
             HStack(spacing: 6) {
                 if let lastUpdate = model.state.lastUpdate {
@@ -275,10 +289,10 @@ struct IslandView: View {
                 Spacer()
                 Button("Quit", action: onQuit)
                     .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
             }
             .font(.system(size: 9))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(palette.tertiaryText)
             .padding(.horizontal, 10)
             .padding(.bottom, 6)
         }
@@ -297,6 +311,8 @@ struct IslandView: View {
 struct StageDetail: View {
     let pipeline: Pipeline
 
+    @Environment(\.islandPalette) private var palette
+
     private var projectName: String {
         pipeline.projectPath.split(separator: "/").last.map(String.init)
             ?? pipeline.projectPath
@@ -307,10 +323,10 @@ struct StageDetail: View {
             HStack(spacing: 5) {
                 Text(projectName)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
                 Text("#\(pipeline.iid)")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(palette.tertiaryText)
                 Spacer(minLength: 0)
             }
 
@@ -318,7 +334,7 @@ struct StageDetail: View {
                 HStack(alignment: .center, spacing: 7) {
                     Text(group.stage.name)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(StatusStyle.color(for: group.stage.status))
+                        .foregroundStyle(palette.color(for: group.stage.status))
                         .frame(width: 52, alignment: .leading)
 
                     FlowLayout(spacing: 10, lineSpacing: 3) {
@@ -327,14 +343,18 @@ struct StageDetail: View {
                                 JobDot(status: job.status, name: job.name, stage: group.stage.name)
                                 Text(Self.shortJobName(job.name, stage: group.stage.name))
                                     .font(.system(size: 10, design: .monospaced))
-                                    .foregroundStyle(job.status == .running ? .primary : .secondary)
+                                    .foregroundStyle(
+                                        job.status == .running
+                                            ? palette.primaryText
+                                            : palette.secondaryText
+                                    )
                                     .lineLimit(1)
                             }
                         }
                         if group.jobs.isEmpty {
                             Text("—")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(palette.tertiaryText)
                         }
                     }
                 }
@@ -397,6 +417,7 @@ struct PipelineLine: View {
     let now: Date
     let onOpen: (Pipeline) -> Void
 
+    @Environment(\.islandPalette) private var palette
     @State private var isHovering = false
 
     private var projectName: String {
@@ -407,29 +428,29 @@ struct PipelineLine: View {
     var body: some View {
         HStack(spacing: 7) {
             if pipeline.isActive {
-                ActivityGlyph(color: StatusStyle.color(for: pipeline.status))
+                ActivityGlyph(color: palette.color(for: pipeline.status))
                     .frame(width: 13)
             } else {
                 Image(systemName: StatusStyle.symbol(for: pipeline.status))
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(StatusStyle.color(for: pipeline.status))
+                    .foregroundStyle(palette.color(for: pipeline.status))
                     .frame(width: 13)
             }
 
             Text(projectName)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white)
+                .foregroundStyle(palette.primaryText)
                 .lineLimit(1)
                 .layoutPriority(2)
 
             Text("#\(pipeline.iid)")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(palette.tertiaryText)
 
             if let ref = pipeline.ref {
                 Text(ref)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(palette.secondaryText.opacity(0.85))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)
@@ -440,7 +461,7 @@ struct PipelineLine: View {
             if let job = pipeline.runningJobs.first {
                 Text(job.name)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(palette.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -450,17 +471,17 @@ struct PipelineLine: View {
             if pipeline.isActive {
                 Text(IslandFormat.elapsed(pipeline, now: now) ?? "—")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(palette.primaryText.opacity(0.9))
                     .monospacedDigit()
                     .help("Running for this long")
             } else if let seconds = pipeline.duration {
                 HStack(spacing: 3) {
                     Image(systemName: "timer")
                         .font(.system(size: 8))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(palette.tertiaryText)
                     Text(IslandFormat.duration(TimeInterval(seconds)))
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(palette.secondaryText)
                         .monospacedDigit()
                 }
                 .help("Took \(IslandFormat.duration(TimeInterval(seconds))) to run")
@@ -470,7 +491,7 @@ struct PipelineLine: View {
         .frame(height: 32)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.white.opacity(isHovering ? 0.07 : 0))
+                .fill(palette.hoverFill.opacity(isHovering ? 1 : 0))
                 .padding(.horizontal, 5)
         )
         .contentShape(Rectangle())
@@ -482,13 +503,18 @@ struct PipelineLine: View {
 
 /// `NSVisualEffectView` bridge: `.ultraThinMaterial` misreads inside a borderless panel.
 struct VisualEffectBackground: NSViewRepresentable {
+    /// Light chrome uses a menu material so the pill reads as frosted paper.
+    var light: Bool = false
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
-        view.material = .hudWindow
+        view.material = light ? .menu : .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
         return view
     }
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = light ? .menu : .hudWindow
+    }
 }

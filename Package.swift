@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "PipelineIsland",
             path: "Sources/PipelineIsland"
+        ),
+        .testTarget(
+            name: "PipelineIslandTests",
+            dependencies: ["PipelineIsland"],
+            path: "Tests/PipelineIslandTests"
         )
     ]
 )

@@ -206,8 +206,19 @@ public actor GitLabClient {
         let envelope: GraphQLResponse<T>
         do {
             envelope = try decoder.decode(GraphQLResponse<T>.self, from: data)
+        } catch let DecodingError.keyNotFound(key, context) {
+            throw GitLabError.decoding("missing \(key.stringValue) at \(Self.path(context))")
+        } catch let DecodingError.valueNotFound(_, context) {
+            throw GitLabError.decoding("null value at \(Self.path(context))")
+        } catch let DecodingError.typeMismatch(_, context) {
+            throw GitLabError.decoding("unexpected type at \(Self.path(context))")
         } catch {
-            throw GitLabError.decoding(error.localizedDescription)
+            let body = String(decoding: data.prefix(4000), as: UTF8.self)
+            let title = body.range(of: "<title>").flatMap { r in
+                body[r.upperBound...].split(separator: "<").first.map(String.init)
+            }
+            let snippet = "[\(http.url?.absoluteString ?? "?")] \(title ?? String(body.prefix(200)))"
+            throw GitLabError.decoding("\(error.localizedDescription) Body: \(snippet)")
         }
 
         // GitLab returns HTTP 200 with an `errors` array for query-level problems.
@@ -226,6 +237,13 @@ public actor GitLabClient {
             throw GitLabError.decoding("Response contained no data.")
         }
         return payload
+    }
+}
+
+extension GitLabClient {
+    static func path(_ context: DecodingError.Context) -> String {
+        context.codingPath.map { $0.intValue.map(String.init) ?? $0.stringValue }
+            .joined(separator: ".")
     }
 }
 

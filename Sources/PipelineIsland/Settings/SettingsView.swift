@@ -284,6 +284,28 @@ struct SettingsView: View {
 
             Divider().padding(.vertical, 4)
 
+            Text("Theme")
+                .font(.system(size: 12, weight: .medium))
+            Picker("Theme", selection: Binding(
+                get: { preferences.appearance },
+                set: { next in
+                    preferences.appearance = next
+                    NotificationCenter.default.post(
+                        name: .pipelineIslandAppearanceDidChange,
+                        object: nil
+                    )
+                }
+            )) {
+                ForEach(AppearancePreference.allCases) { preference in
+                    Text(preference.title).tag(preference)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("Auto follows macOS. Light uses darkened status colours (≥3:1 on white).")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
             Toggle(isOn: Binding(
                 get: { launchAtLogin },
                 set: { wanted in
@@ -368,6 +390,11 @@ struct SettingsView: View {
                 || $0.localizedName.lowercased().contains("built-in")
                 || $0.localizedName.lowercased().contains("liquid retina")
         }
+        let external = screens.first { screen in
+            !(screen.safeAreaInsets.top > 0
+                || screen.localizedName.lowercased().contains("built-in")
+                || screen.localizedName.lowercased().contains("liquid retina"))
+        }
 
         return [
             DisplayOption(
@@ -389,6 +416,11 @@ struct SettingsView: View {
                 preference: .builtIn,
                 title: "Built-in display",
                 detail: builtIn.map(describe) ?? "Lid closed or no built-in display detected."
+            ),
+            DisplayOption(
+                preference: .external,
+                title: "External display",
+                detail: external.map(describe) ?? "No external display attached — falls back to the menu bar display."
             ),
         ]
     }
@@ -414,29 +446,36 @@ struct SettingsView: View {
             }
 
             HStack(spacing: 8) {
-                Text("Host")
-                    .frame(width: 44, alignment: .leading)
+                Text("API Host")
+                    .frame(width: 68, alignment: .leading)
                 TextField("https://gitlab.com", text: $preferences.host)
                     .textFieldStyle(.roundedBorder)
             }
 
             HStack(spacing: 8) {
+                Text("Web Host")
+                    .frame(width: 68, alignment: .leading)
+                TextField("Defaults to API Host", text: $preferences.webHost)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack(spacing: 8) {
                 Text("Token")
-                    .frame(width: 44, alignment: .leading)
+                    .frame(width: 68, alignment: .leading)
                 SecureField("glpat-…", text: $tokenField)
                     .textFieldStyle(.roundedBorder)
                 Button("Save") { saveToken() }
                     .disabled(tokenField.isEmpty)
             }
 
-            Text("Create a token with the **read_api** scope. It is stored in your macOS Keychain, never on disk.")
+            Text("Create a token with the **read_api** scope. It is stored in your macOS Keychain, never on disk. Web Host controls browser links when the API uses a different LAN address.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
                 Button("Open GitLab Token Settings") {
-                    let base = preferences.host.trimmingCharacters(in: .whitespaces)
+                    let base = preferences.webHost.trimmingCharacters(in: .whitespaces)
                     if let url = URL(string: base + "/-/user_settings/personal_access_tokens") {
                         NSWorkspace.shared.open(url)
                     }

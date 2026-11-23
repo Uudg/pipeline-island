@@ -1,18 +1,7 @@
 import SwiftUI
 
-/// Colour + glyph vocabulary shared by the pill and the expanded rows.
+/// Glyph vocabulary shared by the pill and the expanded rows.
 enum StatusStyle {
-    static func color(for status: PipelineStatus) -> Color {
-        if status.isActive { return .blue }
-        switch status {
-        case .success: return .green
-        case .failed: return .red
-        case .canceled, .canceling, .skipped: return .secondary
-        case .manual, .scheduled: return .orange
-        default: return .secondary
-        }
-    }
-
     /// SF Symbol for a pipeline/job status.
     static func symbol(for status: PipelineStatus) -> String {
         if status.isActive { return "circle.dotted" }
@@ -24,16 +13,6 @@ enum StatusStyle {
         case .manual: return "hand.tap"
         case .scheduled: return "clock"
         default: return "circle"
-        }
-    }
-
-    static func color(for mood: IslandMood) -> Color {
-        switch mood {
-        case .running: return .blue
-        case .failed: return .red
-        case .success: return .green
-        case .error: return .orange
-        case .idle: return .secondary
         }
     }
 }
@@ -62,6 +41,7 @@ struct StatusRow: View {
     let now: Date
     let onOpen: (Pipeline) -> Void
 
+    @Environment(\.islandPalette) private var palette
     @State private var isHovering = false
 
     private var projectName: String {
@@ -74,22 +54,22 @@ struct StatusRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     if pipeline.isActive {
-                        ActivityGlyph(color: StatusStyle.color(for: pipeline.status))
+                        ActivityGlyph(color: palette.color(for: pipeline.status))
                     } else {
                         Image(systemName: StatusStyle.symbol(for: pipeline.status))
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(StatusStyle.color(for: pipeline.status))
+                            .foregroundStyle(palette.color(for: pipeline.status))
                     }
 
                     Text(projectName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(palette.primaryText)
                         .lineLimit(1)
 
                     if let ref = pipeline.ref {
                         Text(ref)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.secondaryText)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -99,7 +79,7 @@ struct StatusRow: View {
                     if let elapsed = IslandFormat.elapsed(pipeline, now: now) {
                         Text(elapsed)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.secondaryText)
                             .monospacedDigit()
                     }
                 }
@@ -111,7 +91,7 @@ struct StatusRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(isHovering ? 0.10 : 0))
+                    .fill(palette.hoverFill.opacity(isHovering ? 1 : 0))
             )
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
@@ -127,12 +107,14 @@ struct StageStrip: View {
     /// Compact mode drops the labels and draws dots only, for the collapsed pill.
     var compact: Bool = false
 
+    @Environment(\.islandPalette) private var palette
+
     var body: some View {
         HStack(spacing: compact ? 4 : 6) {
             ForEach(Array(pipeline.jobsByStage.enumerated()), id: \.offset) { index, group in
                 if index > 0 {
                     Capsule()
-                        .fill(Color.white.opacity(0.18))
+                        .fill(palette.connector)
                         .frame(width: compact ? 4 : 6, height: 1)
                 }
 
@@ -151,7 +133,7 @@ struct StageStrip: View {
             if !compact, let running = runningLabel {
                 Text(running)
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .padding(.leading, 2)
@@ -173,21 +155,24 @@ struct JobDot: View {
     let name: String
     let stage: String
 
+    @Environment(\.islandPalette) private var palette
     @State private var pulse = false
 
     private var isRunning: Bool { status == .running }
     /// Not-yet-started work reads as an outline rather than a solid dot.
     private var isPending: Bool { status == .created || status == .pending || status == .manual }
 
+    private var statusColor: Color { palette.color(for: status) }
+
     var body: some View {
         Circle()
             .strokeBorder(
-                StatusStyle.color(for: status).opacity(isPending ? 0.65 : 0),
+                statusColor.opacity(isPending ? 0.65 : 0),
                 lineWidth: 1.5
             )
             .background(
                 Circle().fill(
-                    isPending ? Color.clear : StatusStyle.color(for: status)
+                    isPending ? Color.clear : statusColor
                 )
             )
             .frame(width: 7, height: 7)

@@ -127,6 +127,22 @@ public final class StatusItemController {
         settings.target = self
         menu.addItem(settings)
 
+        let theme = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
+        let themeMenu = NSMenu()
+        for preference in AppearancePreference.allCases {
+            let item = NSMenuItem(
+                title: preference.title,
+                action: #selector(setTheme(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = preference.rawValue
+            item.state = Preferences.shared.appearance == preference ? .on : .off
+            themeMenu.addItem(item)
+        }
+        theme.submenu = themeMenu
+        menu.addItem(theme)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: "Quit Pipeline Island", action: #selector(quit), keyEquivalent: "q")
@@ -154,7 +170,7 @@ public final class StatusItemController {
 
     @objc private func openPipeline(_ sender: NSMenuItem) {
         guard let pipeline = sender.representedObject as? Pipeline,
-              let url = pipeline.webURL(host: Preferences.shared.host) else { return }
+              let url = pipeline.webURL(host: Preferences.shared.webHost) else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -163,6 +179,14 @@ public final class StatusItemController {
     @objc private func openUpdate() { UpdateCheck.openReleasePage() }
     @objc private func openSettings() { onOpenSettings() }
     @objc private func quit() { onQuit() }
+
+    @objc private func setTheme(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let preference = AppearancePreference(rawValue: raw) else { return }
+        Preferences.shared.appearance = preference
+        NotificationCenter.default.post(name: .pipelineIslandAppearanceDidChange, object: nil)
+        rebuildMenu()
+    }
 
     // MARK: - State
 

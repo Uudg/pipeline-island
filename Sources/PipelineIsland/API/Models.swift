@@ -19,7 +19,10 @@ public enum PipelineStatus: String, Codable, Sendable, CaseIterable {
     case unknown = "UNKNOWN"
 
     public init(from decoder: any Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
+        let container = try decoder.singleValueContainer()
+        // Permission-limited tokens (Guest) can get `null` statuses back.
+        guard !container.decodeNil() else { self = .unknown; return }
+        let raw = try container.decode(String.self)
         self = PipelineStatus(rawValue: raw.uppercased()) ?? .unknown
     }
 
@@ -173,12 +176,17 @@ public struct Pipeline: Codable, Sendable, Hashable, Identifiable {
     /// Uses the server-supplied `path` whenever present. The `iid`-based fallback
     /// is **wrong for gitlab.com** — pipeline URLs key off the global id — and is
     /// kept only so fixtures without a `path` still produce something.
-    public func webURL(host: String = "https://gitlab.com") -> URL? {
+    public func webURL(host: String) -> URL? {
+        var base = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return nil }
+        if !base.contains("://") { base = "https://" + base }
+        while base.hasSuffix("/") { base.removeLast() }
+
         if let path, !path.isEmpty {
-            return URL(string: host + path)
+            return URL(string: base + path)
         }
         guard !projectPath.isEmpty else { return nil }
-        return URL(string: "\(host)/\(projectPath)/-/pipelines/\(iid)")
+        return URL(string: "\(base)/\(projectPath)/-/pipelines/\(iid)")
     }
 
     /// Change signature for dedupe: `iid|status|stages|runningJobs`.
@@ -263,8 +271,10 @@ public struct Connection<T: Codable & Sendable>: Codable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // `nodes` can come back null on permission-limited connections.
-        self.nodes = try container.decodeIfPresent([T].self, forKey: .nodes) ?? []
+        // `nodes` — and individual entries — can come back null on
+        // permission-limited connections. Drop entries that don't decode.
+        let raw = try container.decodeIfPresent([Lenient<T>].self, forKey: .nodes) ?? []
+        self.nodes = raw.compactMap(\.value)
     }
 
     private enum CodingKeys: String, CodingKey { case nodes }
@@ -272,6 +282,15 @@ public struct Connection<T: Codable & Sendable>: Codable, Sendable {
 
 extension Connection: Hashable where T: Hashable {}
 extension Connection: Equatable where T: Equatable {}
+
+/// Decodes `T`, or nil when the element is null or malformed.
+struct Lenient<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: any Decoder) throws {
+        value = try? decoder.singleValueContainer().decode(T.self)
+    }
+}
 
 /// Top-level GraphQL response: `{ "data": ..., "errors": [...] }`.
 public struct GraphQLResponse<T: Codable & Sendable>: Codable, Sendable {

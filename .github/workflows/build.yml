@@ -19,6 +19,9 @@ jobs:
       - name: Build
         run: swift build
 
+      - name: Test
+        run: swift test
+
       # Only the geometry spikes: the rest need a GitLab token and a live
       # account, which CI has neither of. These are pure arithmetic and cover
       # the two bugs that shipped twice (off-centre island, hover jump).
